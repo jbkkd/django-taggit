@@ -1,0 +1,4 @@
+django==1.3.1
+-e git://github.com/alex/django-templatetag-sugar.git#egg=django-templatetag-sugar
+-e git://github.com/seldon/django-generic-aggregation.git#egg=django-generic-aggregation
+sphinx
