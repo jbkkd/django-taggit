@@ -26,7 +26,7 @@ MIN_WEIGHT = getattr(settings, 'TAGGIT_TAGCLOUD_MIN_WEIGHT', 1.0)
 register = template.Library()
 
 
-def is_generic_tagging(through_model):
+def _is_generic_tagging(through_model):
     """
     This function takes the "through model"[*] of a given tagging model;
     returns ``True`` if that tagging model is a generic one, ``False`` otherwise.
@@ -58,10 +58,8 @@ def is_generic_tagging(through_model):
                 return True
         raise ImproperlyConfigured(err_msg)
 
- 
-    
-@register.tag(name="get_tag_list")
-def do_get_tag_list(parser, token):
+
+def _parse_tag_args(token):
     try:
         # Splitting by ``None`` == splitting by spaces
         tag_name, args = token.contents.split(None, 1)
@@ -111,7 +109,12 @@ def do_get_tag_list(parser, token):
             msg = "%s isn't a valid value for the 'limit' clause of tag %s" % limitvar, tag_name
             raise template.TemplateSyntaxError(msg)
 
-    return TagListNode(asvar, app_label, model_name, content_qs_var, limit)
+    return (asvar, app_label, model_name, content_qs_var, limit)
+
+    
+@register.tag(name="get_tag_list")
+def do_get_tag_list(parser, token):
+    return TagListNode(*_parse_tag_args(token))
              
 
 class TagListNode(template.Node):
@@ -121,75 +124,104 @@ class TagListNode(template.Node):
         self.model_name = model_name and model_name.lower() or None
         self.content_qs_var = content_qs_var
         self.limit = limit
+        
+    def get_annotated_tag_queryset(self, context):
+        # Django model representing tags
+        tag_model = get_model(*TAG_MODEL.split('.'))
+        # Django model representing tagged items (w.r.t. the tagging model in use)
+        through_model = get_model(*TAGGED_ITEM_MODEL.split('.'))
+        through_opts = through_model._meta
+        
+        if self.content_qs_var:
+                self.content_qs = template.Variable(self.content_qs_var).resolve(context)
+        
+        # determine what kind of tagging model is in use
+        if _is_generic_tagging(through_model):
+            ##-------- generic tagging model --------##
+            ## the ``QuerySet`` -- of tags -- to be annotated
+            tag_qs = tag_model.objects.all()
+            ## the ``QuerySet`` -- of generic models -- the annotation is performed against 
+            # start with a QuerySet comprising every tagged item in the DB  
+            generic_qs = through_model.objects.all()
+            if self.app_label and self.model_name:
+                # filter away tagged items that aren't instances of the given model
+                ct = ContentType.objects.get(app_label=self.app_label, model=self.model_name)
+                generic_qs = generic_qs.filter(content_type=ct)
+            elif self.app_label:
+                # filter away tagged items not belonging to the given app
+                generic_qs = generic_qs.filter(content_type__app_label=self.app_label)
+            # restrict annotation to a subset of tagged content objects
+            if hasattr(self, 'content_qs'):
+                generic_qs = generic_qs.filter(content_object__in=self.content_qs)
+            annotated_tag_qs = generic_annotate(tag_qs, through_model.content_object, Count('pk'), generic_qs, desc=True, alias='count')               
+        else:       
+            ##------- model-specific tagging model ---------##
+            content_model = through_opts.get_field_by_name('content_object')[0].rel.to
+            if self.app_label:
+                if self.app_label != content_model._meta.app_label.lower():
+                    # wrong app label !
+                    return ''
+                if self.model_name:
+                    if self.model_name != content_model._meta.object_name.lower():
+                        # wrong model name !
+                        return ''
+            # start with a QuerySet comprising every tag in the DB
+            qs = tag_model.objects.all()
+            if self.content_qs_var:
+                content_qs = template.Variable(self.content_qs_var).resolve(context)
+                if isinstance(content_qs, QuerySet) and (content_qs.model == content_model): # sanity check
+                    lookup_field = '%s__content_object__in' % through_opts.object_name.lower()
+                    lookup_args = {lookup_field: content_qs}
+                    qs = qs.filter(**lookup_args)  
+                else:
+                    # invalid QuerySet
+                    return ''
+            aggregate_field = through_opts.get_field_by_name('tag')[0].rel.relname
+            qs = qs.annotate(count=Count(aggregate_field))
+            if self.limit:
+                qs=qs[:self.limit]
+            annotated_tag_qs = qs.order_by('-count')
+            
+            return annotated_tag_qs
     
     def render(self, context):
         try:
-            # Django model representing tags
-            tag_model = get_model(*TAG_MODEL.split('.'))
-            # Django model representing tagged items (w.r.t. the tagging model in use)
-            through_model = get_model(*TAGGED_ITEM_MODEL.split('.'))
-            through_opts = through_model._meta
-            
-            if self.content_qs_var:
-                    self.content_qs = template.Variable(self.content_qs_var).resolve(context)
-            
-            # determine what kind of tagging model is in use
-            if is_generic_tagging(through_model):
-                ##-------- generic tagging model --------##
-                ## the ``QuerySet`` -- of tags -- to be annotated
-                tag_qs = tag_model.objects.all()
-                ## the ``QuerySet`` -- of generic models -- the annotation is performed against 
-                # start with a QuerySet comprising every tagged item in the DB  
-                generic_qs = through_model.objects.all()
-                if self.app_label and self.model_name:
-                    # filter away tagged items that aren't instances of the given model
-                    ct = ContentType.objects.get(app_label=self.app_label, model=self.model_name)
-                    generic_qs = generic_qs.filter(content_type=ct)
-                elif self.app_label:
-                    # filter away tagged items not belonging to the given app
-                    generic_qs = generic_qs.filter(content_type__app_label=self.app_label)
-                # restrict annotation to a subset of tagged content objects
-                if hasattr(self, 'content_qs'):
-                    generic_qs = generic_qs.filter(content_object__in=self.content_qs)
-                annotated_tag_qs = generic_annotate(tag_qs, through_model.content_object, Count('pk'), generic_qs, desc=True, alias='count')               
-            else:       
-                ##------- model-specific tagging model ---------##
-                content_model = through_opts.get_field_by_name('content_object')[0].rel.to
-                if self.app_label:
-                    if self.app_label != content_model._meta.app_label.lower():
-                        # wrong app label !
-                        return ''
-                    if self.model_name:
-                        if self.model_name != content_model._meta.object_name.lower():
-                            # wrong model name !
-                            return ''
-                # start with a QuerySet comprising every tag in the DB
-                qs = tag_model.objects.all()
-                if self.content_qs_var:
-                    content_qs = template.Variable(self.content_qs_var).resolve(context)
-                    if isinstance(content_qs, QuerySet) and (content_qs.model == content_model): # sanity check
-                        lookup_field = '%s__content_object__in' % through_opts.object_name.lower()
-                        lookup_args = {lookup_field: content_qs}
-                        qs = qs.filter(**lookup_args)  
-                    else:
-                        # invalid QuerySet
-                        return ''
-                aggregate_field = through_opts.get_field_by_name('tag')[0].rel.relname
-                qs = qs.annotate(count=Count(aggregate_field))
-                if self.limit:
-                    qs=qs[:self.limit]
-                annotated_tag_qs = qs.order_by('-count')
-            context[self.asvar] = annotated_tag_qs
+            context[self.asvar] = self.get_annotated_tag_queryset(context)
         except: # fail silently on rendering
             return ''
-
+    
+    
 @register.tag(name="get_tag_cloud")
 def do_get_tag_cloud(parser, token):
-    pass
+    return TagCloudNode(*_parse_tag_args(token))
 
-class TagCloudNode(template.Node):
-    def __init__(self):
-        pass
+class TagCloudNode(TagListNode):
+    def get_weight_func(self, count_min, count_max, weight_min, weight_max):
+        def weight_func(c, c_min=count_min, c_max=count_max, w_min=weight_min, w_max=weight_max):
+            """
+            Take an (integer) tag count and return a proportional (float) weight, 
+            lying between a predefined numeric range.
+            """
+            # prevent a division by zero here
+            if c_max == c_min:
+                K = 1.0
+            else:
+                K = float(w_max-w_min)/float(c_max-c_min)
+                return K*(c - c_max) + w_max 
+        return weight_func
+    
+    def get_size_func(self):
+        raise NotImplementedError
     
     def render(self, context):
-        return ''
+        try:
+            tag_qs = self.get_annotated_tag_queryset(context)
+            # how many times each tag in the QuerySet was applied to an item 
+            tag_count_list = tag_qs.values_list('count', flat=True)
+            weight_fun = self.get_weight_fun(min(tag_count_list), max(tag_count_list), MIN_WEIGHT, MAX_WEIGHT)
+            for tag in tag_qs:
+                tag.weight = weight_fun(tag.count)
+            context[self.asvar] = tag_qs.order_by('name')
+            return ''    
+        except: # fail silently on rendering
+            return ''
