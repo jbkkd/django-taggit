@@ -153,7 +153,13 @@ class _TaggableManager(models.Manager):
         return self.through.lookup_kwargs(self.instance)
 
     @require_instance_manager
-    def add(self, *tags):
+    def add(self, *tags, **kwargs):
+        """
+        If `tag_kwargs` is present in kwargs, it will be passed as kwargs to
+        create each tag.
+        """
+        tag_kwargs = kwargs.get('tag_kwargs', {})
+
         str_tags = set([
             t
             for t in tags
@@ -168,15 +174,15 @@ class _TaggableManager(models.Manager):
         tag_objs.update(existing)
 
         for new_tag in str_tags - set(t.name for t in existing):
-            tag_objs.add(self.through.tag_model().objects.create(name=new_tag))
+            tag_objs.add(self.through.tag_model().objects.create(name=new_tag, **tag_kwargs))
 
         for tag in tag_objs:
             self.through.objects.get_or_create(tag=tag, **self._lookup_kwargs())
 
     @require_instance_manager
-    def set(self, *tags):
+    def set(self, *tags, **kwargs):
         self.clear()
-        self.add(*tags)
+        self.add(*tags, **kwargs)
 
     @require_instance_manager
     def remove(self, *tags):
