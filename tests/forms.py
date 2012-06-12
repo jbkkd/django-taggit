@@ -2,7 +2,8 @@ from __future__ import unicode_literals, absolute_import
 
 from django import forms, VERSION
 
-from .models import Food, DirectFood, CustomPKFood, OfficialFood
+from .models import (
+    Food, DirectFood, CustomPKFood, OfficialFood, CustomUserArticle)
 
 
 fields = None
@@ -29,3 +30,7 @@ class OfficialFoodForm(forms.ModelForm):
     class Meta:
         model = OfficialFood
         fields = fields
+
+class CustomUserArticleForm(forms.ModelForm):
+    class Meta:
+        model = CustomUserArticle

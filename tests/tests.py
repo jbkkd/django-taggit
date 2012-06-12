@@ -20,11 +20,12 @@ from django.contrib.contenttypes.models import ContentType
 from taggit.managers import TaggableManager, _TaggableManager, _model_name
 from taggit.models import Tag, TaggedItem
 from .forms import (FoodForm, DirectFoodForm, CustomPKFoodForm,
-    OfficialFoodForm)
+    OfficialFoodForm, CustomUserArticleForm)
 from .models import (Food, Pet, HousePet, DirectFood, DirectPet,
     DirectHousePet, TaggedFood, CustomPKFood, CustomPKPet, CustomPKHousePet,
     TaggedCustomPKFood, OfficialFood, OfficialPet, OfficialHousePet,
-    OfficialThroughModel, OfficialTag, Photo, Movie, Article, CustomManager)
+    OfficialThroughModel, OfficialTag, Photo, Movie, Article, CustomManager,
+    CustomUser, CustomUserArticle, CustomUserTag)
 from taggit.utils import parse_tags, edit_string_for_tags
 
 
@@ -571,3 +572,17 @@ class SouthSupportTests(TestCase):
         except ImproperlyConfigured as e:
             exception = e
         self.assertIn("SOUTH_MIGRATION_MODULES", exception.args[0])
+
+
+class TagKwargsTestCase(BaseTaggingTestCase):
+    def test_custom_kwargs(self):
+        first_user = CustomUser.objects.create(name='first')
+        second_user = CustomUser.objects.create(name='second')
+
+        CustomUserTag.objects.create(custom_user=second_user, name='awesome')
+
+        f = CustomUserArticleForm({'title': 'Custom Kwargs', 'custom_user': first_user.pk, 'tags': 'awesome'})
+        f.save()
+
+        article = CustomUserArticle.objects.get()
+        self.assertEqual(article.tags.all()[0].custom_user_id, first_user.id)

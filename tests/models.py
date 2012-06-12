@@ -192,3 +192,31 @@ class CustomManager(models.Model):
             pass
 
     tags = TaggableManager(manager=Foo)
+
+
+# Test custom through tag model with custom kwargs
+
+class CustomUser(models.Model):
+    name = models.CharField(max_length=50)
+
+
+class CustomUserTag(models.Model):
+    custom_user = models.ForeignKey(CustomUser)
+    name = models.CharField(max_length=50)
+
+
+class CustomUserThroughModel(GenericTaggedItemBase):
+    tag = models.ForeignKey(CustomUserTag, related_name = "%(app_label)s_%(class)s_items")
+
+
+class CustomUserTaggableManager(TaggableManager):
+    def save_form_data(self, instance, value):
+        tag_kwargs = {'custom_user': instance.custom_user}
+        getattr(instance, self.name).set(tag_kwargs=tag_kwargs, *value)
+
+
+class CustomUserArticle(models.Model):
+    title = models.CharField(max_length=100)
+    custom_user = models.ForeignKey(CustomUser)
+
+    tags = CustomUserTaggableManager(through=CustomUserThroughModel)
