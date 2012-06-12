@@ -9,11 +9,12 @@ from django.test import TestCase, TransactionTestCase
 from taggit.managers import TaggableManager
 from taggit.models import Tag, TaggedItem
 from taggit.tests.forms import (FoodForm, DirectFoodForm, CustomPKFoodForm,
-    OfficialFoodForm)
+    OfficialFoodForm, CustomUserArticleForm)
 from taggit.tests.models import (Food, Pet, HousePet, DirectFood, DirectPet,
     DirectHousePet, TaggedPet, CustomPKFood, CustomPKPet, CustomPKHousePet,
     TaggedCustomPKPet, OfficialFood, OfficialPet, OfficialHousePet,
-    OfficialThroughModel, OfficialTag, Photo, Movie, Article)
+    OfficialThroughModel, OfficialTag, Photo, Movie, Article, CustomUser,
+    CustomUserArticle, CustomUserTag)
 from taggit.utils import parse_tags, edit_string_for_tags
 
 
@@ -473,3 +474,17 @@ class TagStringParseTestCase(UnitTestCase):
         self.assertEqual(edit_string_for_tags([plain, spaces, comma]), u'"com,ma", "spa ces", plain')
         self.assertEqual(edit_string_for_tags([plain, comma]), u'"com,ma", plain')
         self.assertEqual(edit_string_for_tags([comma, spaces]), u'"com,ma", "spa ces"')
+
+
+class TagKwargsTestCase(BaseTaggingTestCase):
+    def test_custom_kwargs(self):
+        first_user = CustomUser.objects.create(name='first')
+        second_user = CustomUser.objects.create(name='second')
+
+        CustomUserTag.objects.create(custom_user=second_user, name='awesome')
+
+        f = CustomUserArticleForm({'title': 'Custom Kwargs', 'custom_user': first_user.pk, 'tags': 'awesome'})
+        f.save()
+
+        article = CustomUserArticle.objects.get()
+        self.assertEqual(article.tags.all()[0].custom_user_id, first_user.id)

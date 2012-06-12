@@ -1,6 +1,7 @@
 from django import forms
 
-from taggit.tests.models import Food, DirectFood, CustomPKFood, OfficialFood
+from taggit.tests.models import (Food, DirectFood, CustomPKFood, OfficialFood,
+    CustomUserArticle)
 
 
 class FoodForm(forms.ModelForm):
@@ -18,3 +19,7 @@ class CustomPKFoodForm(forms.ModelForm):
 class OfficialFoodForm(forms.ModelForm):
     class Meta:
         model = OfficialFood
+
+class CustomUserArticleForm(forms.ModelForm):
+    class Meta:
+        model = CustomUserArticle
