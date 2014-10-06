@@ -2,8 +2,8 @@ from __future__ import unicode_literals, absolute_import
 
 from django import forms, VERSION
 
-from .models import (
-    Food, DirectFood, CustomPKFood, OfficialFood, CustomUserArticle)
+from .models import (Food, DirectFood, CustomPKFood, OfficialFood,
+    CustomUserArticle)
 
 
 fields = None
