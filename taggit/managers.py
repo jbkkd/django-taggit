@@ -146,7 +146,7 @@ class _TaggableManager(models.Manager):
         return self.through.lookup_kwargs(self.instance)
 
     @require_instance_manager
-    def add(self, *tags):
+    def add(self, *tags, **extra_kwargs):
         str_tags = set()
         tag_objs = set()
         for t in tags:
@@ -169,7 +169,9 @@ class _TaggableManager(models.Manager):
             tag_objs.add(self.through.tag_model().objects.create(name=new_tag))
 
         for tag in tag_objs:
-            self.through.objects.get_or_create(tag=tag, **self._lookup_kwargs())
+            kwargs = self._lookup_kwargs()
+            kwargs.update(extra_kwargs)
+            self.through.objects.get_or_create(tag=tag, **kwargs)
 
     @require_instance_manager
     def names(self):
@@ -180,9 +182,9 @@ class _TaggableManager(models.Manager):
         return self.get_queryset().values_list('slug', flat=True)
 
     @require_instance_manager
-    def set(self, *tags):
+    def set(self, *tags, **extra_kwargs):
         self.clear()
-        self.add(*tags)
+        self.add(*tags, **extra_kwargs)
 
     @require_instance_manager
     def remove(self, *tags):
