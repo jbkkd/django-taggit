@@ -69,6 +69,164 @@ class ExtraJoinRestriction(object):
         return self.__class__(self.alias, self.col, self.content_types[:])
 
 
+class _TaggableManager(models.Manager):
+    def __init__(self, through, model, instance, prefetch_cache_name):
+        self.through = through
+        self.model = model
+        self.instance = instance
+        self.prefetch_cache_name = prefetch_cache_name
+        self._db = None
+
+    def is_cached(self, instance):
+        return self.prefetch_cache_name in instance._prefetched_objects_cache
+
+    def get_queryset(self, extra_filters=None):
+        try:
+            return self.instance._prefetched_objects_cache[self.prefetch_cache_name]
+        except (AttributeError, KeyError):
+            kwargs = extra_filters if extra_filters else {}
+            return self.through.tags_for(self.model, self.instance, **kwargs)
+
+    def get_prefetch_queryset(self, instances, queryset=None):
+        if queryset is not None:
+            raise ValueError("Custom queryset can't be used for this lookup.")
+
+        instance = instances[0]
+        from django.db import connections
+        db = self._db or router.db_for_read(instance.__class__, instance=instance)
+
+        fieldname = ('object_id' if issubclass(self.through, GenericTaggedItemBase)
+                     else 'content_object')
+        fk = self.through._meta.get_field(fieldname)
+        query = {
+            '%s__%s__in' % (self.through.tag_relname(), fk.name):
+                set(obj._get_pk_val() for obj in instances)
+        }
+        join_table = self.through._meta.db_table
+        source_col = fk.column
+        connection = connections[db]
+        qn = connection.ops.quote_name
+        qs = self.get_queryset(query).using(db).extra(
+            select={
+                '_prefetch_related_val': '%s.%s' % (qn(join_table), qn(source_col))
+            }
+        )
+        return (qs,
+                attrgetter('_prefetch_related_val'),
+                lambda obj: obj._get_pk_val(),
+                False,
+                self.prefetch_cache_name)
+
+    # Django < 1.6 uses the previous name of query_set
+    get_query_set = get_queryset
+    get_prefetch_query_set = get_prefetch_queryset
+
+    def _lookup_kwargs(self):
+        return self.through.lookup_kwargs(self.instance)
+
+    @require_instance_manager
+    def add(self, *tags, **extra_kwargs):
+        str_tags = set()
+        tag_objs = set()
+        for t in tags:
+            if isinstance(t, self.through.tag_model()):
+                tag_objs.add(t)
+            elif isinstance(t, six.string_types):
+                str_tags.add(t)
+            else:
+                raise ValueError("Cannot add {0} ({1}). Expected {2} or str.".format(
+                    t, type(t), type(self.through.tag_model())))
+
+        # If str_tags has 0 elements Django actually optimizes that to not do a
+        # query.  Malcolm is very smart.
+        existing = self.through.tag_model().objects.filter(
+            name__in=str_tags
+        )
+        tag_objs.update(existing)
+
+        for new_tag in str_tags - set(t.name for t in existing):
+            tag_objs.add(self.through.tag_model().objects.create(name=new_tag))
+
+        for tag in tag_objs:
+            kwargs = self._lookup_kwargs()
+            kwargs.update(extra_kwargs)
+            self.through.objects.get_or_create(tag=tag, **kwargs)
+
+    @require_instance_manager
+    def names(self):
+        return self.get_queryset().values_list('name', flat=True)
+
+    @require_instance_manager
+    def slugs(self):
+        return self.get_queryset().values_list('slug', flat=True)
+
+    @require_instance_manager
+    def set(self, *tags, **extra_kwargs):
+        self.clear()
+        self.add(*tags, **extra_kwargs)
+
+    @require_instance_manager
+    def remove(self, *tags):
+        self.through.objects.filter(**self._lookup_kwargs()).filter(
+            tag__name__in=tags).delete()
+
+    @require_instance_manager
+    def clear(self):
+        self.through.objects.filter(**self._lookup_kwargs()).delete()
+
+    def most_common(self):
+        return self.get_queryset().annotate(
+            num_times=models.Count(self.through.tag_relname())
+        ).order_by('-num_times')
+
+    @require_instance_manager
+    def similar_objects(self):
+        lookup_kwargs = self._lookup_kwargs()
+        lookup_keys = sorted(lookup_kwargs)
+        qs = self.through.objects.values(*six.iterkeys(lookup_kwargs))
+        qs = qs.annotate(n=models.Count('pk'))
+        qs = qs.exclude(**lookup_kwargs)
+        qs = qs.filter(tag__in=self.all())
+        qs = qs.order_by('-n')
+
+        # TODO: This all feels like a bit of a hack.
+        items = {}
+        if len(lookup_keys) == 1:
+            # Can we do this without a second query by using a select_related()
+            # somehow?
+            f = _get_field(self.through, lookup_keys[0])
+            objs = f.rel.to._default_manager.filter(**{
+                "%s__in" % f.rel.field_name: [r["content_object"] for r in qs]
+            })
+            for obj in objs:
+                items[(getattr(obj, f.rel.field_name),)] = obj
+        else:
+            preload = {}
+            for result in qs:
+                preload.setdefault(result['content_type'], set())
+                preload[result["content_type"]].add(result["object_id"])
+
+            for ct, obj_ids in preload.items():
+                ct = ContentType.objects.get_for_id(ct)
+                for obj in ct.model_class()._default_manager.filter(pk__in=obj_ids):
+                    items[(ct.pk, obj.pk)] = obj
+
+        results = []
+        for result in qs:
+            obj = items[
+                tuple(result[k] for k in lookup_keys)
+            ]
+            obj.similar_tags = result["n"]
+            results.append(obj)
+        return results
+
+    # _TaggableManager needs to be hashable but BaseManagers in Django 1.8+ overrides
+    # the __eq__ method which makes the default __hash__ method disappear.
+    # This checks if the __hash__ attribute is None, and if so, it reinstates the original method.
+    if models.Manager.__hash__ is None:
+        __hash__ = object.__hash__
+
+
 class TaggableManager(RelatedField, Field):
     _related_name_counter = 0
 
