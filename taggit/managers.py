@@ -139,9 +139,10 @@ class _TaggableManager(models.Manager):
 
         # If str_tags has 0 elements Django actually optimizes that to not do a
         # query.  Malcolm is very smart.
+        partner = extra_kwargs.get('partner')
         existing = self.through.tag_model().objects.filter(
             name__in=str_tags,
-            partner=extra_kwargs['partner']
+            partner=partner
         )
         tag_objs.update(existing)
 
