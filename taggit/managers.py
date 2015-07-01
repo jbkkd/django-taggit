@@ -146,7 +146,7 @@ class _TaggableManager(models.Manager):
         return self.through.lookup_kwargs(self.instance)
 
     @require_instance_manager
-    def add(self, *tags):
+    def add(self, *tags, **extra_kwargs):
         str_tags = set()
         tag_objs = set()
         for t in tags:
@@ -160,13 +160,15 @@ class _TaggableManager(models.Manager):
 
         # If str_tags has 0 elements Django actually optimizes that to not do a
         # query.  Malcolm is very smart.
+        tag_kwargs = extra_kwargs.get('tag_kwargs', {})
         existing = self.through.tag_model().objects.filter(
-            name__in=str_tags
+            name__in=str_tags,
+            **tag_kwargs
         )
         tag_objs.update(existing)
 
         for new_tag in str_tags - set(t.name for t in existing):
-            tag_objs.add(self.through.tag_model().objects.create(name=new_tag))
+            tag_objs.add(self.through.tag_model().objects.create(name=new_tag, **tag_kwargs))
 
         for tag in tag_objs:
             self.through.objects.get_or_create(tag=tag, **self._lookup_kwargs())
@@ -180,9 +182,9 @@ class _TaggableManager(models.Manager):
         return self.get_queryset().values_list('slug', flat=True)
 
     @require_instance_manager
-    def set(self, *tags):
+    def set(self, *tags, **extra_kwargs):
         self.clear()
-        self.add(*tags)
+        self.add(*tags, **extra_kwargs)
 
     @require_instance_manager
     def remove(self, *tags):
