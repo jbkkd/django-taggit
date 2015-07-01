@@ -10,14 +10,14 @@ from django.db import connection
 from django.test import TestCase, TransactionTestCase
 from django.utils.encoding import force_text
 
-from .forms import CustomPKFoodForm, DirectFoodForm, FoodForm, OfficialFoodForm
+from .forms import CustomPKFoodForm, DirectFoodForm, FoodForm, OfficialFoodForm, CustomUserArticleForm
 from .models import (Article, Child, CustomManager, CustomPKFood,
                      CustomPKHousePet, CustomPKPet, DirectFood,
                      DirectHousePet, DirectPet, Food, HousePet, Movie,
                      OfficialFood, OfficialHousePet, OfficialPet,
                      OfficialTag, OfficialThroughModel, Pet, Photo,
                      TaggedCustomPKFood, TaggedCustomPKPet, TaggedFood,
-                     TaggedPet)
+                     TaggedPet, CustomUser, CustomUserTag, CustomUserArticle)
 
 from taggit.managers import _model_name, _TaggableManager, TaggableManager
 from taggit.models import Tag, TaggedItem
